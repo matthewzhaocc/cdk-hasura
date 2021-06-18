@@ -17,7 +17,19 @@ export class CdkHasuraStack extends cdk.Stack {
       validation: certManager.CertificateValidation.fromDns(dnsZone),
       domainName: 'demo.lhl.lol'
     })
-    const vpc = new ec2.Vpc(this, 'hasuraVpc');
+    const vpc = new ec2.Vpc(this, 'hasuraVpc', {
+      natGateways: 0,
+      subnetConfiguration: [
+        {
+          subnetType: ec2.SubnetType.PUBLIC,
+          name: 'svc',
+        },
+        {
+          subnetType: ec2.SubnetType.PUBLIC,
+          name: 'db'
+        }
+      ]
+    });
     const credSecret = new secretsManager.Secret(this, 'db-secret', {
       secretName: '/hasura',
       generateSecretString: {
@@ -31,13 +43,13 @@ export class CdkHasuraStack extends cdk.Stack {
           instanceType: ec2.InstanceType.of(ec2.InstanceClass.R5, ec2.InstanceSize.LARGE),
           vpc,
           vpcSubnets: {
-            subnetType: ec2.SubnetType.PRIVATE
+            subnetGroupName: 'db'
           },
       },
       credentials: rds.Credentials.fromPassword('matthew', credSecret.secretValue),
       defaultDatabaseName: 'hasura'
     })
-    db.connections.allowDefaultPortFromAnyIpv4();
+    
     const hasuraApp = new ecsPatterns.ApplicationLoadBalancedFargateService(this, 'hasuraApp', {
       vpc,
       taskImageOptions: {
@@ -52,7 +64,11 @@ export class CdkHasuraStack extends cdk.Stack {
       memoryLimitMiB:1024,
       domainZone: dnsZone,
       domainName: "demo.lhl.lol",
-      certificate: cert
+      certificate: cert,
+      taskSubnets: {
+        subnetGroupName: 'svc',
+      }
     })
+    db.connections.allowDefaultPortFrom(hasuraApp.service.connections)
   }
 }
